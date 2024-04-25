@@ -1,9 +1,7 @@
-import numpy as np
+import torch
 
-# Taken from https://github.com/openai/baselines/blob/master/baselines/ddpg/noise.py, which is
-# based on http://math.stackexchange.com/questions/1287634/implementing-ornstein-uhlenbeck-in-matlab
 class OrnsteinUhlenbeckActionNoise:
-    def __init__(self, mu, sigma=0.01, theta=.15, dt=1e-2, x0=None):
+    def __init__(self, mu, sigma=0.2, theta=0.15, dt=1e-2, x0=None):
         self.theta = theta
         self.mu = mu
         self.sigma = sigma
@@ -11,14 +9,14 @@ class OrnsteinUhlenbeckActionNoise:
         self.x0 = x0
         self.reset()
 
+    def reset(self):
+        self.x_prev = torch.zeros_like(self.mu) if self.x0 is None else self.x0
+
     def __call__(self):
         x = self.x_prev + self.theta * (self.mu - self.x_prev) * self.dt + \
-                self.sigma * np.sqrt(self.dt) * np.random.normal(size=self.mu.shape)
+            self.sigma * torch.sqrt(torch.tensor(self.dt)) * torch.randn_like(self.mu)
         self.x_prev = x
         return x
-
-    def reset(self):
-        self.x_prev = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
 
     def __repr__(self):
         return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)

@@ -1,6 +1,6 @@
 import numpy as np
 import random
-import gym
+import gymnasium as gym
 
 from environment import RandomizedEnvironment
 from agent import Agent

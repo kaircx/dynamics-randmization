@@ -2,12 +2,16 @@ import os
 import numpy as np
 
 from gym.utils import EzPickle
-from gym.envs.robotics.fetch_env import FetchEnv
+# import gymnasium_robotics
+# import gymnasium_robotics.envs.fetch.slide 
+# from gymnasium_robotics.envs.robot_env import MujocoPyRobotEnv 
+# from gymnasium_robotics.envs.fetch.slide import MujocoPyFetchSlideEnv as FetchEnv
+from gymnasium_robotics.envs.fetch import MujocoFetchEnv, MujocoPyFetchEnv
 
 # Ensure we get the path separator correct on windows
 MODEL_XML_PATH = os.path.join('fetch', 'slide.xml')
 
-class FetchSlide2(FetchEnv, EzPickle):
+class FetchSlide2(MujocoPyFetchEnv, EzPickle):
     '''
     FetchSlide dependent on properties
     '''
@@ -25,12 +29,13 @@ class FetchSlide2(FetchEnv, EzPickle):
         }
         self.max_angle = 25. / 180. * np.pi
         self.eval_args = eval_args
-        FetchEnv.__init__(
-            self, 'fetch/{}'.format(assets_file),
+        self.render_mode='rgb_array'
+        MujocoPyFetchEnv.__init__(
+            self, model_path='fetch/{}'.format(assets_file),
             has_object=True, block_gripper=True, n_substeps=20,
             gripper_extra_height=-0.02, target_in_the_air=False, target_offset=np.array([0.4, 0.0, 0.0]),
             obj_range=0.1, target_range=0.3, distance_threshold=0.05,
-            initial_qpos=initial_qpos, reward_type=reward_type)
+            initial_qpos=initial_qpos, reward_type=reward_type, render_mode=self.render_mode)
         EzPickle.__init__(self)
 
 
@@ -111,13 +116,12 @@ class FetchSlide2(FetchEnv, EzPickle):
 
         return obj_id
 
-
     def set_property(self, obj_name, prop_name, prop_value):
+
         obj_id = self.object_ids(obj_name)
 
         object_type = prop_name.split('_')[0]
         object_type_id = object_type + '_id'
-
         prop_id = obj_id[object_type_id]
         prop_all = getattr(self.sim.model, prop_name)
         # print('***',prop_name, object_type_id, prop_all[prop_id])#, prop_all[obj_id])
