@@ -16,7 +16,7 @@ class FetchSlide2(MujocoPyFetchEnv, EzPickle):
     FetchSlide dependent on properties
     '''
 
-    def __init__(self, reward_type='sparse', assets_file='slide.xml', eval_args=None):
+    def __init__(self, reward_type='dense', assets_file='slide.xml', eval_args=None):
         '''
         slide2.xml: deformable
         slide3.xml: normal but with surrounding box
@@ -29,7 +29,7 @@ class FetchSlide2(MujocoPyFetchEnv, EzPickle):
         }
         self.max_angle = 25. / 180. * np.pi
         self.eval_args = eval_args
-        self.render_mode='rgb_array'
+        self.render_mode='rgb_array'    
         MujocoPyFetchEnv.__init__(
             self, model_path='fetch/{}'.format(assets_file),
             has_object=True, block_gripper=True, n_substeps=20,

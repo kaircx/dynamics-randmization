@@ -94,8 +94,7 @@ class Agent:
             # Train Critic
             self.train_critic(states, actions, goals, envs, history, y_i)
 
-            # Update Acto
-
+            # Update Actor
             predicted_actions = self.actor(states, goals, history)
             predicted_actions_=predicted_actions.clone().detach()
             predicted_actions_.requires_grad=True
@@ -112,8 +111,9 @@ class Agent:
         for _ in range(num_rollouts):
             # Sample the environment and reset it
             randomized_environment.sample_env()
-            env, env_params = randomized_environment.get_env()
-            obs_dict, _ = env.reset()
+            env=randomized_environment.get_env()
+            env_params = randomized_environment.get_params()
+            obs_dict, _ = randomized_environment.get_env().reset()
             goal = obs_dict['desired_goal']
             episode = Episode(goal, env_params, max_steps)
             
@@ -123,16 +123,16 @@ class Agent:
             last_action = env.action_space.sample()  # Random initial action
             episode.add_step(last_action, obs, 0, achieved, False)
 
-            done = False
+            truncated = False
             episode_reward = 0
-            while not done:
+            while not truncated:
                 # Get the current state, goal, and history for actor evaluation
                 obs = obs_dict['observation']
                 history = episode.get_history()
                 action = self.evaluate_actor(torch.from_numpy(obs.copy()).type(torch.float32),torch.from_numpy(goal.copy()).type(torch.float32),history) 
                 action=action.detach().cpu().numpy()[0]
                 # Execute the action and update the episode
-                new_obs_dict, step_reward, truncated, done, info = env.step(action)
+                new_obs_dict, step_reward, done, truncated, info = env.step(action)
                 new_obs = new_obs_dict['observation']
                 achieved = new_obs_dict['achieved_goal']
                 reward = env.compute_reward(achieved, goal, {})

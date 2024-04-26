@@ -28,7 +28,10 @@ class RandomizedEnvironment:
             Returns a randomized environment and the vector of the parameter
             space that corresponds to this very instance
         """
-        return self._env, self._params
+        return self._env
+    
+    def get_params(self):
+        return self._params
 
     def close_env(self):
         self._env.close()
