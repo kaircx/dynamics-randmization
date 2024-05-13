@@ -9,7 +9,7 @@ from gym.utils import EzPickle
 from gymnasium_robotics.envs.fetch import MujocoFetchEnv, MujocoPyFetchEnv
 
 # Ensure we get the path separator correct on windows
-MODEL_XML_PATH = os.path.join('fetch', 'slide.xml')
+MODEL_XML_PATH = os.path.join('fetch_slide_2', 'slide.xml')
 
 class FetchSlide2(MujocoPyFetchEnv, EzPickle):
     '''
@@ -29,7 +29,7 @@ class FetchSlide2(MujocoPyFetchEnv, EzPickle):
         }
         self.max_angle = 25. / 180. * np.pi
         self.eval_args = eval_args
-        self.render_mode='rgb_array'    
+        self.render_mode='human'    
         MujocoPyFetchEnv.__init__(
             self, model_path='fetch/{}'.format(assets_file),
             has_object=True, block_gripper=True, n_substeps=20,

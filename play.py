@@ -1,10 +1,10 @@
 import numpy as np
 import random
 import gymnasium as gym
-
+import torch
 from environment import RandomizedEnvironment
-from agent import Agent
-from replay_buffer import Episode
+from agent_t import Agent
+from replay_buffer_t import Episode
 
 import fetch_slide_2
 
@@ -18,11 +18,13 @@ MAX_STEPS = 50
 
 RENDER = True
 
-# initialize the agent, both the actor/critic (and target counterparts) networks
-agent = Agent(experiment, BATCH_SIZE*MAX_STEPS)
+
 
 # initialize the environment sampler
 randomized_environment = RandomizedEnvironment(experiment, [0.0, 1.0], [])
+
+# initialize the agent, both the actor/critic (and target counterparts) networks
+agent = Agent(randomized_environment.get_env(), BATCH_SIZE*MAX_STEPS)
 
 # load the wanted model
 agent.load_model(MODEL_NAME)
@@ -30,13 +32,13 @@ agent.load_model(MODEL_NAME)
 success_number = 0
 
 randomized_environment.sample_env()
-env, env_params = randomized_environment.get_env()
-
+env= randomized_environment.get_env()
+env_params = randomized_environment.get_params()
 for test_ep in range(ROLLOUT_NUMBER):
     print("Episode {}".format(test_ep))
 
 
-    current_obs_dict = env.reset()
+    current_obs_dict,_ = randomized_environment.get_env().reset()
 
     # read the current goal, and initialize the episode
     goal = current_obs_dict['desired_goal']
@@ -48,7 +50,7 @@ for test_ep in range(ROLLOUT_NUMBER):
     achieved = current_obs_dict['achieved_goal']
     last_action = env.action_space.sample()
 
-    episode.add_step(last_action, obs, 0, achieved)
+    episode.add_step(last_action, obs, 0, achieved, False)
 
     done = False
 
@@ -58,14 +60,14 @@ for test_ep in range(ROLLOUT_NUMBER):
         history = episode.get_history()
 
         if RENDER: env.render()
-        action = agent.evaluate_actor(agent._actor.predict_target, obs, goal, history)
-
-        new_obs_dict, step_reward, done, info = env.step(action[0])
+        action = agent.evaluate_actor(torch.from_numpy(obs.copy()).type(torch.float32),torch.from_numpy(goal.copy()).type(torch.float32), history)
+        action=action.detach().cpu().numpy()[0]
+        new_obs_dict, step_reward, done,truncated, info = env.step(action)
 
         new_obs = new_obs_dict['observation']
         achieved = new_obs_dict['achieved_goal']
 
-        episode.add_step(action[0], new_obs, step_reward, achieved, terminal=done)
+        # episode.add_step(action[0], new_obs, step_reward, achieved, terminal=done)
 
         current_obs_dict = new_obs_dict
 

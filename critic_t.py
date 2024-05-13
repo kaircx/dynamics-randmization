@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.optim as optim
 
 UNITS = 128
-MAX_STEPS = 50
 
 class Critic(nn.Module):
     def __init__(self, dim_state, dim_goal, dim_action, dim_env, action_bound, tau, learning_rate):
@@ -37,11 +36,11 @@ class Critic(nn.Module):
         self.optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
 
     def forward(self, input_env, input_goal, input_action, input_state, input_history):
-        ff_input = torch.cat((input_env, input_goal, input_action, input_state), dim=1)
+        ff_input = torch.cat((input_env, input_goal, input_action, input_state), dim=0)
         ff_output = self.ff_branch(ff_input)
         _, (h_n, _) = self.recurrent_branch(input_history)
-        h_n = h_n[-1, :, :]  # 取最後の隠れ層の状態
-        merged_input = torch.cat((ff_output, h_n), dim=1)
+        h_n = h_n[-1]  # 取最後の隠れ層の状態
+        merged_input = torch.cat((ff_output, h_n), dim=0)
         output = self.merged_branch(merged_input)
         return output
 
@@ -61,9 +60,10 @@ class Critic(nn.Module):
         target_network.load_state_dict(self.state_dict())
 
     def action_gradients(self, input_env, input_state, input_goal, input_action, input_history):
+        input_action = input_action.detach().requires_grad_(True)
         self.zero_grad()
         outputs = self.forward(input_env, input_goal, input_action, input_state, input_history)
-        outputs.backward(torch.ones_like(outputs))#must remove
+        outputs.backward()#must remove
         if input_action.grad is not None:
             return input_action.grad
         else:

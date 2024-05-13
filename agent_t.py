@@ -8,28 +8,28 @@ from replay_buffer_t import Episode, ReplayBuffer
 
 MAX_STEPS = 50
 TAU = 5e-3
-LEARNING_RATE = 1e-3
+ACTION_BOUND = 3
+LEARNING_RATE = 1e-4
 class Agent:
-    def __init__(self, env, batch_size):
-        self.env = env
+    def __init__(self, batch_size):
         self.batch_size = batch_size
 
         # Hardcoded dimensions for now
-        self.dim_state = 25
-        self.dim_goal = 3
-        self.dim_action = 4  # Example value
+        self.dim_state = 4
+        self.dim_goal = 1
+        self.dim_action = 1  # Example value
         self.dim_env = 1
 
         # Actor-Critic Networks
-        self.actor = Actor(self.dim_state, self.dim_goal, self.dim_action, env.action_space.high[0], TAU, LEARNING_RATE, batch_size)
-        self.critic = Critic(self.dim_state, self.dim_goal, self.dim_action, self.dim_env, env.action_space.high[0], TAU, LEARNING_RATE)#, self.actor.get_num_trainable_vars())
+        self.actor = Actor(self.dim_state, self.dim_goal, self.dim_action, ACTION_BOUND , TAU, LEARNING_RATE, batch_size)
+        self.critic = Critic(self.dim_state, self.dim_goal, self.dim_action, self.dim_env, ACTION_BOUND , TAU, LEARNING_RATE)#, self.actor.get_num_trainable_vars())
 
         # Noise Process
         self.action_noise = OrnsteinUhlenbeckActionNoise(mu=torch.zeros(self.dim_action))
 
         # Target Networks
-        self.target_actor = Actor(self.dim_state, self.dim_goal, self.dim_action, env.action_space.high[0], TAU, LEARNING_RATE, batch_size)
-        self.target_critic = Critic(self.dim_state, self.dim_goal, self.dim_action, self.dim_env, env.action_space.high[0], TAU, LEARNING_RATE)#, self.actor.get_num_trainable_vars())
+        self.target_actor = Actor(self.dim_state, self.dim_goal, self.dim_action, ACTION_BOUND, TAU, LEARNING_RATE, batch_size)
+        self.target_critic = Critic(self.dim_state, self.dim_goal, self.dim_action, self.dim_env, ACTION_BOUND, TAU, LEARNING_RATE)#, self.actor.get_num_trainable_vars())
         self.actor.initialize_target_network(self.target_actor)
         self.critic.initialize_target_network(self.target_critic)
 
@@ -73,32 +73,31 @@ class Agent:
 
     def update_networks(self, episodes, gamma):
         for episode in episodes:
-            states = episode.get_states()
-            actions = episode.get_actions()
-            rewards = episode.get_rewards().unsqueeze(1)  # Ensure rewards have the correct shape
-            next_states = torch.roll(states, -1, 0)
+            states = episode.get_states()[-1]
+            actions = episode.get_actions()[-1]
+            rewards = episode.get_rewards()[-1]  # Ensure rewards have the correct shape
+            # next_states = torch.roll(states, -1, 0)
             envs=episode.get_env()
-            goals = torch.unsqueeze(episode.get_goal().clone().detach(), 0).repeat(states.size(0), 1)
-            history = torch.stack([episode.get_history(t) for t in range(states.size(0))])
+            goals = torch.tensor([0.0],dtype=torch.float32,requires_grad=True)#episode.get_goal().repeat(states.size(0), 1)
+            history = episode.get_history()#torch.stack([episode.get_history(t) for t in range(states.size(0))])
             # Compute target actions and Q-values for the next states
             with torch.no_grad():
-                target_actions = self.target_actor(next_states, goals, history)
-                envs=torch.from_numpy(envs).to(torch.float32)
-                envs=envs.squeeze(0).repeat(goals.size(0),1)
-                target_q_values = self.target_critic(envs, goals, target_actions, next_states,  history)
-                terminal_tensors = episode.get_terminal().clone().detach()
+                target_actions = self.target_actor(states, goals, history)
+                envs=torch.tensor(envs,dtype=torch.float32,requires_grad=True)
+                target_q_values = self.target_critic(envs, goals, target_actions[0], states,  history)
+                terminal_tensors = episode.get_terminal()[-1]
                 if terminal_tensors.dtype != torch.bool:
                     terminal_tensors = terminal_tensors.bool()
-                y_i = rewards + gamma * target_q_values * (~terminal_tensors.unsqueeze(1))
-
+                y_i = rewards + gamma * target_q_values * (~terminal_tensors)
+            # print(y_i)
             # Train Critic
             self.train_critic(states, actions, goals, envs, history, y_i)
 
             # Update Actor
             predicted_actions = self.actor(states, goals, history)
             predicted_actions_=predicted_actions.clone().detach()
-            predicted_actions_.requires_grad=True
-            action_gradients = self.critic.action_gradients(envs, states, goals, predicted_actions_, history)
+            predicted_actions_[0].requires_grad=True
+            action_gradients = self.critic.action_gradients(envs, states, goals, predicted_actions[0], history)
             self.train_actor(states, goals, history, action_gradients)
 
         # Soft update target networks
@@ -109,37 +108,25 @@ class Agent:
         success_count = 0
         total_reward = 0
         for _ in range(num_rollouts):
+            ep_rewards = 0
             # Sample the environment and reset it
             randomized_environment.sample_env()
-            env=randomized_environment.get_env()
-            env_params = randomized_environment.get_params()
-            obs_dict, _ = randomized_environment.get_env().reset()
-            goal = obs_dict['desired_goal']
-            episode = Episode(goal, env_params, max_steps)
-            
-            # Initialize with the first observation and a random action
-            obs = obs_dict['observation']
-            achieved = obs_dict['achieved_goal']
-            last_action = env.action_space.sample()  # Random initial action
-            episode.add_step(last_action, obs, 0, achieved, False)
-
-            truncated = False
-            episode_reward = 0
+            env_params=randomized_environment.get_env()
+            episode = Episode([], env_params, MAX_STEPS)
+            obs, _ = randomized_environment.get_env().reset()
+            last_action = randomized_environment.get_env().action_space.sample()
+            obs, reward, truncated, done , info = randomized_environment.get_env().step(last_action)
+            goal = 0.0
+            ep_rewards += reward
+            episode.add_step(last_action, obs, reward, done)
             while not truncated:
-                # Get the current state, goal, and history for actor evaluation
-                obs = obs_dict['observation']
-                history = episode.get_history()
-                action = self.evaluate_actor(torch.from_numpy(obs.copy()).type(torch.float32),torch.from_numpy(goal.copy()).type(torch.float32),history) 
-                action=action.detach().cpu().numpy()[0]
-                # Execute the action and update the episode
-                new_obs_dict, step_reward, done, truncated, info = env.step(action)
-                new_obs = new_obs_dict['observation']
-                achieved = new_obs_dict['achieved_goal']
-                reward = env.compute_reward(achieved, goal, {})
-                episode_reward += reward
-                episode.add_step(action, new_obs, reward, achieved, terminal=done)
-                obs_dict = new_obs_dict
-            total_reward += episode_reward
+                action = self.evaluate_actor(torch.from_numpy(obs).type(torch.float32),torch.tensor([goal]).type(torch.float32), episode.get_history())
+                action += self.apply_action_noise(action.detach())
+                new_obs, reward, done, truncated,info = randomized_environment.get_env().step(action[0].detach().cpu().numpy())
+                episode.add_step(action[0], new_obs, torch.tensor([reward],dtype=torch.float32,requires_grad=True),done)
+                obs = new_obs
+                ep_rewards += reward
+            total_reward += ep_rewards
             # Check if the episode was successful
             if info.get('is_success', 0.0) > 0.0:
                 success_count += 1
