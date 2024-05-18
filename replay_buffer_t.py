@@ -2,12 +2,14 @@
 import torch
 import random
 from collections import deque
+from memory_profiler import profile
+
 
 class SamplingSizeError(Exception):
     pass
 
 class Episode:
-    def __init__(self, goal, env, max_history_timesteps):
+    def __init__(self, env, max_history_timesteps):
         self._states = []
         self._actions = []
         self._rewards = []
@@ -18,7 +20,7 @@ class Episode:
         self._dim_history_atom = 0
         self._max_history_timesteps = max_history_timesteps
 
-        self._goal = torch.tensor(goal, dtype=torch.float32)
+        # self._goal = torch.tensor(goal, dtype=torch.float32)
         self._env = env
 
     def add_step(self, action, obs, reward,done):#, achieved_goal, terminal):
@@ -55,8 +57,8 @@ class Episode:
             padded_history = torch.cat((zeros_pad, self._history[start:end]))
             return padded_history.requires_grad_(True)
 
-    def get_goal(self):
-        return torch.tensor(self._goal,requires_grad=True,dtype=torch.float32)
+    # def get_goal(self):
+    #     return torch.tensor(self._goal,requires_grad=True,dtype=torch.float32)
 
     def get_terminal(self):
         return torch.tensor(self._terminal)

@@ -6,11 +6,10 @@ UNITS = 128
 MAX_STEPS = 50
 
 class Actor(nn.Module):
-    def __init__(self, dim_state, dim_goal, dim_action, action_bound, tau, learning_rate, batch_size):
+    def __init__(self, dim_state, dim_action, action_bound, tau, learning_rate, batch_size):
         super(Actor, self).__init__()
         self.dim_state = dim_state
         self.dim_action = dim_action
-        self.dim_goal = dim_goal
         self.action_bound = action_bound
         self.tau = tau
         self.learning_rate = learning_rate
@@ -18,7 +17,7 @@ class Actor(nn.Module):
 
         # Network Architecture
         self.ff_branch = nn.Sequential(
-            nn.Linear(dim_goal + dim_state, UNITS),
+            nn.Linear(dim_state, UNITS),
             nn.ReLU(),
             nn.Linear(UNITS, UNITS),
             nn.ReLU()
@@ -37,12 +36,12 @@ class Actor(nn.Module):
         
         self.optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
 
-    def forward(self, input_state, input_goal, input_memory):
+    def forward(self, input_state, input_memory):
         if len(input_state.shape) == 1:
-            input_goal = input_goal.unsqueeze(0) 
+            # input_goal = input_goal.unsqueeze(0) 
             input_state = input_state.unsqueeze(0)
             input_memory = input_memory.unsqueeze(0)
-        ff_input = torch.cat((input_goal, input_state), dim=1)
+        ff_input = input_state #torch.cat((input_goal, input_state), dim=1)
         ff_output = self.ff_branch(ff_input)
         _, (h_n, _) = self.recurrent_branch(input_memory)
         h_n = h_n[-1, :,:]  
@@ -51,9 +50,9 @@ class Actor(nn.Module):
         scaled_output = output * self.action_bound
         return scaled_output
 
-    def train(self, input_state, input_goal, input_history, a_gradient):
+    def train(self, input_state, input_history, a_gradient):
         self.optimizer.zero_grad()
-        output = self.forward(input_goal, input_state, input_history)
+        output = self.forward(input_state, input_history)
         loss = -torch.mean(output * a_gradient)
         loss.backward()
         self.optimizer.step()

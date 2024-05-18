@@ -5,19 +5,18 @@ import torch.optim as optim
 UNITS = 128
 
 class Critic(nn.Module):
-    def __init__(self, dim_state, dim_goal, dim_action, dim_env, action_bound, tau, learning_rate):
+    def __init__(self, dim_state, dim_action, dim_env, action_bound, tau, learning_rate):
         super(Critic, self).__init__()
         self.dim_state = dim_state
         self.dim_action = dim_action
         self.dim_env = dim_env
-        self.dim_goal = dim_goal
         self.action_bound = action_bound
         self.tau = tau
         self.learning_rate = learning_rate
 
         # Network Architecture
         self.ff_branch = nn.Sequential(
-            nn.Linear(dim_env + dim_goal + dim_action + dim_state, UNITS),
+            nn.Linear(dim_env + dim_action + dim_state, UNITS),
             nn.ReLU(),
             nn.Linear(UNITS, UNITS),
             nn.ReLU()
@@ -35,8 +34,8 @@ class Critic(nn.Module):
         
         self.optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
 
-    def forward(self, input_env, input_goal, input_action, input_state, input_history):
-        ff_input = torch.cat((input_env, input_goal, input_action, input_state), dim=0)
+    def forward(self, input_env,  input_action, input_state, input_history):
+        ff_input = torch.cat((input_env, input_action, input_state), dim=0)
         ff_output = self.ff_branch(ff_input)
         _, (h_n, _) = self.recurrent_branch(input_history)
         h_n = h_n[-1]  # 取最後の隠れ層の状態
@@ -44,9 +43,9 @@ class Critic(nn.Module):
         output = self.merged_branch(merged_input)
         return output
 
-    def train(self, input_env, input_state, input_goal, input_action, input_history, predicted_q_value):
+    def train(self, input_env, input_state, input_action, input_history, predicted_q_value):
         self.optimizer.zero_grad()
-        output = self.forward(input_env, input_goal, input_action, input_state, input_history)
+        output = self.forward(input_env, input_action, input_state, input_history)
         loss = nn.MSELoss()(output, predicted_q_value)
         loss.backward()
         self.optimizer.step()
@@ -59,10 +58,10 @@ class Critic(nn.Module):
     def initialize_target_network(self, target_network):
         target_network.load_state_dict(self.state_dict())
 
-    def action_gradients(self, input_env, input_state, input_goal, input_action, input_history):
+    def action_gradients(self, input_env, input_state, input_action, input_history):
         input_action = input_action.detach().requires_grad_(True)
         self.zero_grad()
-        outputs = self.forward(input_env, input_goal, input_action, input_state, input_history)
+        outputs = self.forward(input_env, input_action, input_state, input_history)
         outputs.backward()#must remove
         if input_action.grad is not None:
             return input_action.grad
