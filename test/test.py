@@ -45,6 +45,7 @@ parser.add_argument('--exploration_noise', default=0.1, type=float)
 parser.add_argument('--max_episode', default=100000, type=int) # num of games
 parser.add_argument('--print_log', default=5, type=int)
 parser.add_argument('--update_iteration', default=200, type=int)
+parser.add_argument('--max_length_of_trajectory', default=800, type=int)
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -216,7 +217,7 @@ def main():
     if args.mode == 'test':
         agent.load()
         for i in range(args.test_iteration):
-            state = env.reset()
+            state, _ = env.reset()
             for t in count():
                 action = agent.select_action(state)
                 next_state, reward, done, _, info = env.step(np.float32(action))
@@ -234,7 +235,7 @@ def main():
         for i in range(args.max_episode):
             total_reward = 0
             step =0
-            state, _ = env.reset()
+            state, _= env.reset()
             for t in count():
                 action = agent.select_action(state)
                 action = (action + np.random.normal(0, args.exploration_noise, size=env.action_space.shape[0])).clip(
@@ -244,7 +245,7 @@ def main():
                 agent.replay_buffer.push((state, next_state, action, reward, np.float32(done)))
 
                 state = next_state
-                if done:
+                if done or t >= args.max_length_of_trajectory:
                     break
                 step += 1
                 total_reward += reward
