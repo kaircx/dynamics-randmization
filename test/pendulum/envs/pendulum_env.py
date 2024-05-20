@@ -7,7 +7,7 @@ import random
  
 class CustomInvertedPendulumEnv(InvertedPendulumEnv):
     def __init__(self):
-        # self.render_mode='human'   
+        self.render_mode='human'   
         self._parameter_ranges={
             'length':[0.1,1.5],
             'mass':[3.0,8.0],

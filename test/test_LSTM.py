@@ -139,20 +139,38 @@ class Actor(nn.Module):
         return scaled_output
 
 
-
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
 
-        self.l1 = nn.Linear(state_dim + action_dim, 400)
-        self.l2 = nn.Linear(400 , 300)
-        self.l3 = nn.Linear(300, 1)
+        self.ff_branch = nn.Sequential(
+            nn.Linear(state_dim + action_dim + param_dim, UNITS),
+            nn.ReLU(),
+        )
 
-    def forward(self, x, u):
-        x = F.relu(self.l1(torch.cat([x, u], 1)))
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        return x
+        self.ff_branch2 = nn.Sequential(
+            nn.Linear(state_dim + action_dim, UNITS),
+            nn.ReLU(),
+        )
+
+        self.recurrent_branch = nn.LSTM(input_size=UNITS, hidden_size=UNITS, batch_first=True)
+        
+        self.merged_branch = nn.Sequential(
+            nn.Linear(2 * UNITS, UNITS),
+            nn.ReLU(),
+            nn.Linear(UNITS, UNITS),
+            nn.ReLU(),
+            nn.Linear(UNITS, action_dim),
+            nn.Tanh()
+        )
+
+    def forward(self, param, input_state, input_action, history):
+        output1 = self.ff_branch(torch.cat((param, input_action, input_state),dim=1))
+        output2 = self.ff_branch2(torch.cat((input_state,history),dim=1))
+        hi, (h_n, ff) = self.recurrent_branch(output2.unsqueeze(1))
+        merged_input = torch.cat((output1, h_n[-1]),dim=1)
+        output = self.merged_branch(merged_input)
+        return output
 
 
 class DDPG(object):
@@ -191,11 +209,10 @@ class DDPG(object):
             param = torch.FloatTensor(p).to(device)
             history = torch.FloatTensor(h).to(device)
             # Compute the target Q value
-            target_Q = self.critic_target(next_state, self.actor_target(next_state,history))
+            target_Q = self.critic_target(param, next_state, self.actor_target(next_state,history),history)
             target_Q = reward + (done * args.gamma * target_Q).detach()
-
             # Get current Q estimate
-            current_Q = self.critic(state, action)
+            current_Q = self.critic(param, state, action, history)
 
             # Compute critic loss
             critic_loss = F.mse_loss(current_Q, target_Q)
@@ -206,7 +223,7 @@ class DDPG(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss = -self.critic(state, self.actor(state,history)).mean()
+            actor_loss = -self.critic(param, state, self.actor(state,history), history).mean()
             self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
 
             # Optimize the actor
@@ -237,15 +254,6 @@ class DDPG(object):
         print("====================================")
         print("model has been loaded...")
         print("====================================")
-
-# def add_to_history(history, action): 
-#     new_entry = action #np.concatenate((state, action)) 
-#     if np.count_nonzero(history) == 0:  # history が空の場合 [if np.count_nonzero(history) == 0:  # history が空の場合] 
-#         history[0] = new_entry 
-#     else:
-#         history = np.roll(history, -1, axis=0)  # すべての行をシフト [history = np.roll(history, -1, axis=0)  # すべての行をシフト] 
-#         history[0] = new_entry  
-#     return history 
 
 def main():
     agent = DDPG(state_dim, action_dim, max_action)
