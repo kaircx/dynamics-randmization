@@ -131,7 +131,7 @@ class Critic(nn.Module):
 
 
 class DDPG(object):
-    def __init__(self, state_dim, action_dim, max_action):
+    def __init__(self, state_dim, action_dim, max_action, writer):
         self.actor = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -142,7 +142,7 @@ class DDPG(object):
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
         self.replay_buffer = Replay_buffer()
-        self.writer = SummaryWriter(directory)
+        self.writer = writer
 
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
@@ -212,7 +212,8 @@ class DDPG(object):
         print("====================================")
 
 def main():
-    agent = DDPG(state_dim, action_dim, max_action)
+    writer = SummaryWriter(directory)
+    agent = DDPG(state_dim, action_dim, max_action, writer)
     ep_r = 0
     if args.mode == 'test':
         agent.load()
@@ -251,6 +252,7 @@ def main():
                 total_reward += reward
             total_step += step+1
             print("Total T:{} Episode: \t{} Total Reward: \t{:0.2f}".format(total_step, i, total_reward))
+            writer.add_scalar('Reward/train', total_reward, i)
             agent.update()
            # "Total T: %d Episode Num: %d Episode T: %d Reward: %f
 

@@ -161,7 +161,7 @@ class Critic(nn.Module):
             nn.Linear(UNITS, UNITS),
             nn.ReLU(),
             nn.Linear(UNITS, action_dim),
-            nn.Tanh()
+            nn.Identity()
         )
 
     def forward(self, param, input_state, input_action, history):
@@ -174,7 +174,7 @@ class Critic(nn.Module):
 
 
 class DDPG(object):
-    def __init__(self, state_dim, action_dim, max_action):
+    def __init__(self, state_dim, action_dim, max_action, writer):
         self.actor = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -185,7 +185,7 @@ class DDPG(object):
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
         self.replay_buffer = Replay_buffer()
-        self.writer = SummaryWriter(directory)
+        self.writer = writer
 
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
@@ -209,7 +209,7 @@ class DDPG(object):
             param = torch.FloatTensor(p).to(device)
             history = torch.FloatTensor(h).to(device)
             # Compute the target Q value
-            target_Q = self.critic_target(param, next_state, self.actor_target(next_state,history),history)
+            target_Q = self.critic_target(param, next_state, self.actor_target(next_state,action),action)
             target_Q = reward + (done * args.gamma * target_Q).detach()
             # Get current Q estimate
             current_Q = self.critic(param, state, action, history)
@@ -256,14 +256,16 @@ class DDPG(object):
         print("====================================")
 
 def main():
-    agent = DDPG(state_dim, action_dim, max_action)
+    writer = SummaryWriter(directory)
+    agent = DDPG(state_dim, action_dim, max_action, writer)
     ep_r = 0
     if args.mode == 'test':
         agent.load()
         for i in range(args.test_iteration):
             state, _ = env.reset()
+            history = env.action_space.sample()
             for t in count():
-                action = agent.select_action(state)
+                action = agent.select_action(state,history)
                 next_state, reward, done, _, info = env.step(np.float32(action))
                 ep_r += reward
                 env.render()
@@ -272,6 +274,7 @@ def main():
                     ep_r = 0
                     break
                 state = next_state
+                history=action
 
     elif args.mode == 'train':
         if args.load: agent.load()
@@ -288,11 +291,9 @@ def main():
                     env.action_space.low, env.action_space.high)
                 next_state, reward, done, _,info = env.step(action)
                 if args.render and i >= args.render_interval : env.render()
-
-                history=action
-
                 agent.replay_buffer.push((state, next_state, action, reward, np.float32(done), param ,history))
 
+                history=action
                 state = next_state
                 if done or t >= args.max_length_of_trajectory:
                     break
@@ -300,6 +301,7 @@ def main():
                 total_reward += reward
             total_step += step+1
             print("Total T:{} Episode: \t{} Total Reward: \t{:0.2f}".format(total_step, i, total_reward))
+            writer.add_scalar('Reward/train', total_reward, i)
             agent.update()
            # "Total T: %d Episode Num: %d Episode T: %d Reward: %f
 
