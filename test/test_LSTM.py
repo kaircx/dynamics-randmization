@@ -46,7 +46,7 @@ parser.add_argument('--max_episode', default=100000, type=int) # num of games
 parser.add_argument('--print_log', default=5, type=int)
 parser.add_argument('--update_iteration', default=200, type=int)
 parser.add_argument('--max_length_of_trajectory', default=800, type=int)
-parser.add_argument('--history_length', default=5, type=int)
+parser.add_argument('--history_length', default=1, type=int)
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -60,6 +60,7 @@ if args.seed:
 
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
+param_dim = len(env.get_params())
 max_action = float(env.action_space.high[0])
 min_Val = torch.tensor(1e-7).float().to(device) # min value
 
@@ -78,9 +79,6 @@ class Replay_buffer():
         self.ptr = 0
 
     def push(self, data):
-        if np.any(np.all(data[-1] == 0, axis=1)):
-            print('The length of history is not equal to args.history_length')
-            return
         if len(self.storage) == self.max_size:
             self.storage[int(self.ptr)] = data
             self.ptr = (self.ptr + 1) % self.max_size
@@ -89,35 +87,57 @@ class Replay_buffer():
 
     def sample(self, batch_size):
         ind = np.random.randint(0, len(self.storage), size=batch_size)
-        x, y, u, r, d ,h= [], [], [], [], [], []
+        x, y, u, r, d, p ,h= [], [], [], [], [], [], []
 
         for i in ind:
-            X, Y, U, R, D, H = self.storage[i]
+            X, Y, U, R, D, P, H = self.storage[i]
             x.append(np.array(X, copy=False))
             y.append(np.array(Y, copy=False))
             u.append(np.array(U, copy=False))
             r.append(np.array(R, copy=False))
             d.append(np.array(D, copy=False))
+            p.append(np.array(P, copy=False))
             h.append(np.array(H, copy=False))
 
-        return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), np.array(h)
+        return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), np.array(p), np.array(h)
 
-
+UNITS=128
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
         super(Actor, self).__init__()
 
-        self.l1 = nn.Linear(state_dim, 400)
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, action_dim)
-
         self.max_action = max_action
 
-    def forward(self, x):
-        x = F.relu(self.l1(x))
-        x = F.relu(self.l2(x))
-        x = self.max_action * torch.tanh(self.l3(x))
-        return x
+        self.ff_branch = nn.Sequential(
+            nn.Linear(state_dim, UNITS),
+            nn.ReLU(),
+        )
+
+        self.ff_branch2 = nn.Sequential(
+            nn.Linear(state_dim + action_dim, UNITS),
+            nn.ReLU(),
+        )
+        
+        self.recurrent_branch = nn.LSTM(input_size=UNITS, hidden_size=UNITS, batch_first=True)
+        
+        self.merged_branch = nn.Sequential(
+            nn.Linear(2 * UNITS, UNITS),
+            nn.ReLU(),
+            nn.Linear(UNITS, UNITS),
+            nn.ReLU(),
+            nn.Linear(UNITS, action_dim),
+            nn.Tanh()
+        )
+        
+    def forward(self, input_state, history):
+        output1 = self.ff_branch(input_state)
+        output2 = self.ff_branch2(torch.cat((input_state,history),dim=1))
+        hi, (h_n, ff) = self.recurrent_branch(output2.unsqueeze(1))
+        merged_input = torch.cat((output1, h_n[-1]),dim=1)
+        output = self.merged_branch(merged_input)
+        scaled_output = output * self.max_action
+        return scaled_output
+
 
 
 class Critic(nn.Module):
@@ -153,23 +173,25 @@ class DDPG(object):
         self.num_actor_update_iteration = 0
         self.num_training = 0
 
-    def select_action(self, state):
+    def select_action(self, state, history):
         state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-        return self.actor(state).cpu().data.numpy().flatten()
+        history = torch.FloatTensor(history.reshape(1, -1)).to(device)
+        return self.actor(state,history).cpu().data.numpy().flatten()
 
     def update(self):
 
         for it in range(args.update_iteration):
             # Sample replay buffer
-            x, y, u, r, d, h = self.replay_buffer.sample(args.batch_size)
+            x, y, u, r, d, p, h = self.replay_buffer.sample(args.batch_size)
             state = torch.FloatTensor(x).to(device)
             action = torch.FloatTensor(u).to(device)
             next_state = torch.FloatTensor(y).to(device)
             done = torch.FloatTensor(1-d).to(device)
             reward = torch.FloatTensor(r).to(device)
+            param = torch.FloatTensor(p).to(device)
             history = torch.FloatTensor(h).to(device)
             # Compute the target Q value
-            target_Q = self.critic_target(next_state, self.actor_target(next_state))
+            target_Q = self.critic_target(next_state, self.actor_target(next_state,history))
             target_Q = reward + (done * args.gamma * target_Q).detach()
 
             # Get current Q estimate
@@ -184,7 +206,7 @@ class DDPG(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss = -self.critic(state, self.actor(state)).mean()
+            actor_loss = -self.critic(state, self.actor(state,history)).mean()
             self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
 
             # Optimize the actor
@@ -216,14 +238,14 @@ class DDPG(object):
         print("model has been loaded...")
         print("====================================")
 
-def add_to_history(history, state, action): 
-    new_entry = np.concatenate((state, action)) 
-    if np.count_nonzero(history) == 0:  # history が空の場合 [if np.count_nonzero(history) == 0:  # history が空の場合] 
-        history[0] = new_entry 
-    else:
-        history = np.roll(history, -1, axis=0)  # すべての行をシフト [history = np.roll(history, -1, axis=0)  # すべての行をシフト] 
-        history[0] = new_entry  
-    return history 
+# def add_to_history(history, action): 
+#     new_entry = action #np.concatenate((state, action)) 
+#     if np.count_nonzero(history) == 0:  # history が空の場合 [if np.count_nonzero(history) == 0:  # history が空の場合] 
+#         history[0] = new_entry 
+#     else:
+#         history = np.roll(history, -1, axis=0)  # すべての行をシフト [history = np.roll(history, -1, axis=0)  # すべての行をシフト] 
+#         history[0] = new_entry  
+#     return history 
 
 def main():
     agent = DDPG(state_dim, action_dim, max_action)
@@ -250,17 +272,18 @@ def main():
             total_reward = 0
             step =0
             state, _= env.reset()
-            history = np.zeros((args.history_length, state_dim + action_dim))
+            param = env.get_params()
+            history = env.action_space.sample()
             for t in count():
-                action = agent.select_action(state)
+                action = agent.select_action(state, history)
                 action = (action + np.random.normal(0, args.exploration_noise, size=env.action_space.shape[0])).clip(
                     env.action_space.low, env.action_space.high)
                 next_state, reward, done, _,info = env.step(action)
                 if args.render and i >= args.render_interval : env.render()
 
-                history=add_to_history(history, state, action)
+                history=action
 
-                agent.replay_buffer.push((state, next_state, action, reward, np.float32(done),history))
+                agent.replay_buffer.push((state, next_state, action, reward, np.float32(done), param ,history))
 
                 state = next_state
                 if done or t >= args.max_length_of_trajectory:
